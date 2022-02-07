@@ -1,7 +1,7 @@
 import datetime
 import os
 import random
-import sqlite3
+import aiosqlite
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -25,15 +25,18 @@ start_time = datetime.datetime.utcnow()
 plugin = lightbulb.Plugin("Core")
 
 is_vps = False
-if not is_vps:
-    DIR = os.path.dirname(__file__)
-    db = sqlite3.connect(os.path.join(DIR, "D:/Coding/MObot/tags.db"))
-    sql = db.cursor()
-else:
-    print("# VPS MODE")
-    DIR = os.path.dirname(__file__)
-    db = sqlite3.connect(os.path.join(DIR, "/root/mobot/tags.db"))
-    sql = db.cursor()
+
+
+async def define_db():
+    if not is_vps:
+        dirr = os.path.dirname(__file__)
+        db = await aiosqlite.connect(os.path.join(dirr, "D:/Coding/MObot/tags.db"))
+    else:
+        print("# VPS MODE")
+        dirr = os.path.dirname(__file__)
+        db = await aiosqlite.connect(os.path.join(dirr, "/root/mobot/tags.db"))
+    sql = await db.cursor()
+    return sql, db
 
 
 @plugin.listener(lightbulb.CommandErrorEvent)
@@ -93,9 +96,10 @@ async def on_ready(event):
 
 @plugin.listener(hikari.GuildJoinEvent)
 async def on_guild_join(event):
-    sql.execute(f'create table if not exists "{event.guild_id}"("id" integer not null,'
-                '"tags_name" text not null, "tags_content" text not null, "tags_date" integer not null,'
-                ' "usage_count" integer not null')
+    sql, db = await define_db()
+    await sql.execute(f'create table if not exists "{event.guild_id}"("id" integer not null,'
+                      '"tags_name" text not null, "tags_content" text not null, "tags_date" integer not null,'
+                      ' "usage_count" integer not null')
 
 
 @plugin.command
@@ -105,15 +109,16 @@ async def on_guild_join(event):
 @lightbulb.command("create", "Create a tag.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def create(ctx: lightbulb.Context):
+    sql, db = await define_db()
     attachment = ctx.attachments
     compensation = datetime.timedelta(hours=9)
     now = datetime.datetime.now() + compensation
 
-    sql.execute(f'create table if not exists "{ctx.get_guild().id}"("id" integer not null,'
-                '"tags_name" text not null, "tags_content" text not null, "tags_date" integer not null,'
-                ' "usage_count" integer not null)')
+    await sql.execute(f'create table if not exists "{ctx.get_guild().id}"("id" integer not null,'
+                      '"tags_name" text not null, "tags_content" text not null, "tags_date" integer not null,'
+                      ' "usage_count" integer not null)')
 
-    sql.execute(f'select tags_name from "{ctx.get_guild().id}" where tags_name = "{ctx.options.name}"')
+    await sql.execute(f'select tags_name from "{ctx.get_guild().id}" where tags_name = "{ctx.options.name}"')
     if _ := sql.fetchone():
         await ctx.respond(f"Tag named `{ctx.options.name}` already exists!")
     elif attachment and not ctx.options.content:
@@ -122,29 +127,29 @@ async def create(ctx: lightbulb.Context):
         try:
             image = imgurclient.upload_from_url(image_url, config=None, anon=True)
 
-            sql.execute(
+            await sql.execute(
                 f'insert into "{ctx.get_guild().id}"(id, tags_name, tags_content, tags_date, usage_count)'
                 f'values(?,?,?,?,?)', (ctx.author.id, ctx.options.name, image["link"], now, 0)),
-            db.commit()
-            
+            await db.commit()
+
             await ctx.respond(f":white_check_mark: Created tag with the name `{ctx.options.name}`")
         except ImgurClientError as e:
             channel = ctx.bot.cache.get_guild_channel(713675042143076356)
             await channel.send(f"IMGUR API BRUTAL ERROR\n"
                                f"```{e.error_message} / {e.status_code}```\n"
                                f"<@444550944110149633>")
-            sql.execute(
+            await sql.execute(
                 f'insert into "{ctx.get_guild().id}"(id, tags_name, tags_content, tags_date, usage_count)'
                 f'values(?,?,?,?,?)', (ctx.author.id, ctx.options.name, ctx.attachments[0].url, now, 0)),
-            db.commit()
+            await db.commit()
 
             await ctx.respond(f":white_check_mark: Created tag with the name `{ctx.options.name}`")
     else:
-        sql.execute(
+        await sql.execute(
             f'insert into "{ctx.get_guild().id}"(id, tags_name, tags_content, tags_date, usage_count)'
             f' values(?,?,?,?,?)',
             (ctx.author.id, ctx.options.name, ctx.options.content, now, 0))
-        db.commit()
+        await db.commit()
         await ctx.respond(f":white_check_mark: Created tag with the name `{ctx.options.name}`")
 
 
@@ -154,18 +159,19 @@ async def create(ctx: lightbulb.Context):
 @lightbulb.command("tag", "View a tag.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def tag(ctx: lightbulb.Context):
-    sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
-    if final := sql.fetchone():
-        sql.execute(f'SELECT usage_count FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
-        finalf = sql.fetchone()
+    sql, db = await define_db()
+    await sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
+    if final := await sql.fetchone():
+        await sql.execute(f'SELECT usage_count FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
+        finalf = await sql.fetchone()
         finaluc = finalf[0] + 1
         finalup = int(finaluc)
 
-        sql.execute(
+        await sql.execute(
             f'UPDATE "{ctx.get_guild().id}" set usage_count = "{finalup}" '
             f'WHERE tags_name = "{ctx.options.tag}"')
         await ctx.respond(final[0])
-        db.commit()
+        await db.commit()
     else:
         await ctx.respond(f"Tag named `{ctx.options.tag}` doesn't exist!")
 
@@ -176,17 +182,18 @@ async def tag(ctx: lightbulb.Context):
 @lightbulb.command("delete", "Delete a tag.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def delete(ctx: lightbulb.Context):
+    sql, db = await define_db()
     user = ctx.author.id
-    sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
-    final = sql.fetchone()
+    await sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
+    final = await sql.fetchone()
 
-    sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
-    id1 = sql.fetchone()
+    await sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
+    id1 = await sql.fetchone()
 
     if final:
         if id1[0] == user or ctx.author.id in [444550944110149633, 429935667737264139, 603635602809946113]:
-            sql.execute(f'DELETE from "{ctx.get_guild().id}" where tags_name = "{ctx.options.tag}"')
-            db.commit()
+            await sql.execute(f'DELETE from "{ctx.get_guild().id}" where tags_name = "{ctx.options.tag}"')
+            await db.commit()
             await ctx.respond(f"Tag named `{ctx.options.tag}` deleted successfully")
         else:
             await ctx.respond(":x: You can't delete that tag! If you are the owner or an admin"
@@ -204,13 +211,14 @@ async def delete(ctx: lightbulb.Context):
 @lightbulb.command("edit", "Edit a tag.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def edit(ctx: lightbulb.Context):
+    sql, db = await define_db()
     user = ctx.author.id
     attachment = ctx.attachments
-    sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
-    final = sql.fetchone()
+    await sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
+    final = await sql.fetchone()
 
-    sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
-    id1 = sql.fetchone()
+    await sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
+    id1 = await sql.fetchone()
 
     if final:
         if id1[0] == user or ctx.author.id in [444550944110149633, 429935667737264139, 603635602809946113]:
@@ -218,19 +226,20 @@ async def edit(ctx: lightbulb.Context):
                 if attachment and not ctx.options.value:
                     image_url = ctx.attachments[0].url
                     image = imgurclient.upload_from_url(image_url, config=None, anon=True)
-                    sql.execute(
+                    await sql.execute(
                         f'UPDATE "{ctx.get_guild().id}" set tags_content = "{image["link"]}" '
                         f'WHERE tags_name = "{ctx.options.tag}"')
                 else:
-                    sql.execute(f'UPDATE "{ctx.get_guild().id}"'
-                                f' set tags_content = "{ctx.options.value}" WHERE tags_name = "{ctx.options.tag}"')
-                db.commit()
+                    await sql.execute(f'UPDATE "{ctx.get_guild().id}"'
+                                      f' set tags_content = "{ctx.options.value}" WHERE tags_name = '
+                                      f'"{ctx.options.tag}"')
+                await db.commit()
                 await ctx.respond(f"Tag named `{ctx.options.tag}` edited successfully")
             elif ctx.options.lower.lower() == "name":
-                sql.execute(
+                await sql.execute(
                     f'UPDATE "{ctx.get_guild().id}" set tags_name = "{ctx.options.value}" WHERE tags_name = '
                     f'"{ctx.options.tag}"')
-                db.commit()
+                await db.commit()
                 await ctx.respond(f"Tag named `{ctx.options.tag}` edited successfully")
             else:
                 await ctx.respond(":x: That is not the correct formatting of the"
@@ -247,9 +256,10 @@ async def edit(ctx: lightbulb.Context):
 @lightbulb.command("list", "List all tags you own in this server.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def _list(ctx: lightbulb.Context):
+    sql, db = await define_db()
     user = ctx.author.id
-    sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}" WHERE id = {user}')
-    final = sql.fetchall()
+    await sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}" WHERE id = {user}')
+    final = list(await sql.fetchall())
     finallist = str(final)
     finalc = len(final)
 
@@ -278,8 +288,9 @@ async def _list(ctx: lightbulb.Context):
 @lightbulb.command("listall", "List all tags you own in this server.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def listall(ctx: lightbulb.Context):
-    sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}"')
-    final = sql.fetchall()
+    sql, db = await define_db()
+    await sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}"')
+    final = list(await sql.fetchall())
     finalcount = len(final)
 
     finalstr = str(final)
@@ -309,18 +320,19 @@ async def listall(ctx: lightbulb.Context):
 @lightbulb.command("random", "Show a random tag from this server.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def _random(ctx: lightbulb.Context):
-    sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}"')
-    name = sql.fetchall()
+    sql, db = await define_db()
+    await sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}"')
+    name = list(await sql.fetchall())
     the = random.choice(name)
 
-    sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{the[0]}"')
-    final = sql.fetchone()
+    await sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{the[0]}"')
+    final = await sql.fetchone()
 
-    sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}" WHERE tags_name= "{the[0]}"')
-    tagname = sql.fetchone()
+    await sql.execute(f'SELECT tags_name FROM "{ctx.get_guild().id}" WHERE tags_name= "{the[0]}"')
+    tagname = await sql.fetchone()
 
-    sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name= "{the[0]}"')
-    owner = sql.fetchone()
+    await sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name= "{the[0]}"')
+    owner = await sql.fetchone()
     user = ctx.bot.cache.get_user(owner[0])
 
     await ctx.respond(f"**Tags Name:** {tagname[0]}\n**Tags Owner:** {user}\n{final[0]}")
@@ -331,17 +343,18 @@ async def _random(ctx: lightbulb.Context):
 @lightbulb.command("info", "View information about a tag.")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def info(ctx: lightbulb.Context):
-    sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
-    ownerid = sql.fetchone()
+    sql, db = await define_db()
+    await sql.execute(f'SELECT id FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
+    ownerid = await sql.fetchone()
 
-    sql.execute(f'SELECT tags_date FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
-    date = sql.fetchone()
+    await sql.execute(f'SELECT tags_date FROM "{ctx.get_guild().id}" WHERE tags_name = "{ctx.options.tag}"')
+    date = await sql.fetchone()
 
-    sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
-    content = sql.fetchone()
+    await sql.execute(f'SELECT tags_content FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
+    content = await sql.fetchone()
 
-    sql.execute(f'SELECT usage_count FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
-    count = sql.fetchone()
+    await sql.execute(f'SELECT usage_count FROM "{ctx.get_guild().id}" WHERE tags_name= "{ctx.options.tag}"')
+    count = await sql.fetchone()
 
     if content:
         embed = hikari.Embed(
@@ -380,7 +393,8 @@ async def about(ctx: lightbulb.Context):
 @lightbulb.command("sex", "31")
 @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
 async def sex(ctx: lightbulb.Context):
-    sql.execute('ALTER TABLE "776135101196009492" ADD COLUMN "imgur_id"')
+    sql, db = await define_db()
+    await sql.execute('ALTER TABLE "776135101196009492" ADD COLUMN "imgur_id"')
     await ctx.respond("done :flushed:")
 
 

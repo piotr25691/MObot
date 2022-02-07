@@ -4,3 +4,4 @@ imgurpython~=1.1.7
 psutil~=5.9.0
 hurry.filesize~=0.9
 uptime~=3.0.1
+aiosqlite~=0.17.0

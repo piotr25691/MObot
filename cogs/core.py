@@ -32,7 +32,6 @@ async def define_db():
         dirr = os.path.dirname(__file__)
         db = await aiosqlite.connect(os.path.join(dirr, "D:/Coding/MObot/tags.db"))
     else:
-        print("# VPS MODE")
         dirr = os.path.dirname(__file__)
         db = await aiosqlite.connect(os.path.join(dirr, "/root/mobot/tags.db"))
     sql = await db.cursor()

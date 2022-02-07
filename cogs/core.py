@@ -82,6 +82,8 @@ async def on_command_error(event):
     elif isinstance(event.exception, lightbulb.CommandIsOnCooldown):
         await event.context.respond(
             f":clock5: That command is on cooldown. Try again in **{int(event.exception.retry_after)}** seconds!")
+    else:
+        print(event.exception.__cause__)
 
 
 @plugin.listener(hikari.StartedEvent)
@@ -97,7 +99,7 @@ async def on_guild_join(event):
 
 
 @plugin.command
-@lightbulb.option("content", "The content of the tag.", type=str, required=True,
+@lightbulb.option("content", "The content of the tag.", type=str, required=False,
                   modifier=lightbulb.OptionModifier.CONSUME_REST)
 @lightbulb.option("name", "The name of the tag.", type=str, required=True)
 @lightbulb.command("create", "Create a tag.")
@@ -118,14 +120,13 @@ async def create(ctx: lightbulb.Context):
         image_url = f"{ctx.attachments[0].url}"
 
         try:
-            async with ctx.get_channel().typing():
-                image = imgurclient.upload_from_url(image_url, config=None, anon=True)
+            image = imgurclient.upload_from_url(image_url, config=None, anon=True)
 
-                sql.execute(
-                    f'insert into "{ctx.get_guild().id}"(id, tags_name, tags_content, tags_date, usage_count)'
-                    f'values(?,?,?,?,?)', (ctx.author.id, ctx.options.name, image["link"], now, 0)),
-                db.commit()
-
+            sql.execute(
+                f'insert into "{ctx.get_guild().id}"(id, tags_name, tags_content, tags_date, usage_count)'
+                f'values(?,?,?,?,?)', (ctx.author.id, ctx.options.name, image["link"], now, 0)),
+            db.commit()
+            
             await ctx.respond(f":white_check_mark: Created tag with the name `{ctx.options.name}`")
         except ImgurClientError as e:
             channel = ctx.bot.cache.get_guild_channel(713675042143076356)
